@@ -3,10 +3,17 @@ import pandas as pd
 import os
 import random
 from PIL import Image
+from pymongo import MongoClient
+from bson.objectid import ObjectId
 
+# MongoDB setup
+client = MongoClient(st.secrets["mongodb_uri"])
+db = client["face_rating_db"]
+ratings_collection = db["ratings"]
+users_collection = db["users"]
+
+# Constants
 IMAGE_FOLDER = "faces_to_rate"
-RATINGS_FILE = "ratings.csv"
-USERS_FILE = "users.csv"
 PASSWORD = "choppedtheapp"
 
 # Initialize session state
@@ -15,17 +22,7 @@ if 'user' not in st.session_state:
 if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
 
-# Load or create users database
-if os.path.exists(USERS_FILE):
-    users_df = pd.read_csv(USERS_FILE)
-else:
-    users_df = pd.DataFrame(columns=["username"])
-
-if os.path.exists(RATINGS_FILE):
-    ratings_df = pd.read_csv(RATINGS_FILE)
-else:
-    ratings_df = pd.DataFrame(columns=["image", "rating", "user"])
-
+# Get all images
 all_images = os.listdir(IMAGE_FOLDER)
 
 # Authentication interface
@@ -40,7 +37,7 @@ if not st.session_state.authenticated:
         login_password = st.text_input("Password", type="password", key="login_password")
         
         if st.button("Login"):
-            if login_password == PASSWORD and login_username in users_df["username"].values:
+            if login_password == PASSWORD and users_collection.find_one({"username": login_username}):
                 st.session_state.user = login_username
                 st.session_state.authenticated = True
                 st.rerun()
@@ -55,11 +52,10 @@ if not st.session_state.authenticated:
         if st.button("Register"):
             if register_password != PASSWORD:
                 st.error("Invalid password")
-            elif new_username in users_df["username"].values:
+            elif users_collection.find_one({"username": new_username}):
                 st.error("Username already taken")
             elif new_username:
-                users_df = pd.concat([users_df, pd.DataFrame([{"username": new_username}])], ignore_index=True)
-                users_df.to_csv(USERS_FILE, index=False)
+                users_collection.insert_one({"username": new_username})
                 st.session_state.user = new_username
                 st.session_state.authenticated = True
                 st.rerun()
@@ -71,7 +67,7 @@ if st.session_state.authenticated:
     st.title(f"Rate This Face (1–5) - {st.session_state.user}")
     
     # Get images rated by this user
-    user_rated_images = set(ratings_df[ratings_df["user"] == st.session_state.user]["image"])
+    user_rated_images = set(r["image"] for r in ratings_collection.find({"user": st.session_state.user}))
     unrated_images = list(set(all_images) - user_rated_images)
 
     if not unrated_images:
@@ -107,13 +103,12 @@ if st.session_state.authenticated:
                 rating = 5
                 
         if rating is not None:
-            new_rating = pd.DataFrame([{
+            ratings_collection.insert_one({
                 "image": image_name,
                 "rating": rating,
-                "user": st.session_state.user
-            }])
-            ratings_df = pd.concat([ratings_df, new_rating], ignore_index=True)
-            ratings_df.to_csv(RATINGS_FILE, index=False)
+                "user": st.session_state.user,
+                "timestamp": pd.Timestamp.now()
+            })
             st.success("✅ Rating saved! Refresh to rate another.")
             
         # Show progress
