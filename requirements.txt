@@ -3,4 +3,5 @@ pandas==2.2.3
 Pillow==10.4.0
 watchdog==6.0.0
 pymongo==4.6.2
-certifi==2024.12.14 
+certifi==2024.12.14
+requests==2.31.0 
