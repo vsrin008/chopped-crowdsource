@@ -5,10 +5,15 @@ import random
 from PIL import Image
 from pymongo import MongoClient
 from bson.objectid import ObjectId
+import certifi
 
 # MongoDB setup
 try:
-    client = MongoClient(st.secrets["mongodb_uri"])
+    client = MongoClient(
+        st.secrets["mongodb_uri"],
+        tlsCAFile=certifi.where(),
+        serverSelectionTimeoutMS=5000
+    )
     # Test the connection
     client.admin.command('ping')
     st.session_state.mongo_connected = True
