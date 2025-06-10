@@ -46,6 +46,30 @@ except Exception as e:
 IMAGE_FOLDER = "faces_to_rate"
 PASSWORD = "choppedtheapp"
 
+def save_rating(image_name, rating):
+    try:
+        if st.session_state['db_connected']:
+            # Create a new document for each rating
+            ratings_collection.insert_one({
+                "user": st.session_state.user,
+                "image": image_name,
+                "rating": rating,
+                "timestamp": datetime.now()
+            })
+        else:
+            # Update in-memory ratings
+            for r in st.session_state.ratings:
+                if r["image"] == image_name:
+                    r["rating"] = rating
+                    return
+            st.session_state.ratings.append({
+                "image": image_name,
+                "rating": rating,
+                "timestamp": datetime.now()
+            })
+    except Exception as e:
+        st.error(f"Error saving rating: {str(e)}")
+
 # Initialize session state
 if 'user' not in st.session_state:
     st.session_state.user = ""
@@ -111,7 +135,19 @@ if st.session_state.authenticated:
     
     # Get images rated by this user
     try:
-        user_rated_images = set(r["image"] for r in ratings_collection.find({"user": st.session_state.user}))
+        # First check if user exists and has any ratings
+        user_doc = ratings_collection.find_one({"user": st.session_state.user})
+        if not user_doc:
+            # If user doesn't exist, create their document
+            ratings_collection.insert_one({"user": st.session_state.user, "ratings": []})
+            user_rated_images = set()
+        else:
+            # Get all images rated by this user
+            user_ratings = list(ratings_collection.find(
+                {"user": st.session_state.user, "image": {"$exists": True}}
+            ))
+            user_rated_images = set(r["image"] for r in user_ratings)
+
         unrated_images = list(set(all_images) - user_rated_images)
 
         if not unrated_images:
@@ -148,12 +184,7 @@ if st.session_state.authenticated:
                     
             if rating is not None:
                 try:
-                    ratings_collection.insert_one({
-                        "image": image_name,
-                        "rating": rating,
-                        "user": st.session_state.user,
-                        "timestamp": pd.Timestamp.now()
-                    })
+                    save_rating(image_name, rating)
                     st.success("✅ Rating saved! Refresh to rate another.")
                 except Exception as e:
                     st.error(f"Error saving rating: {str(e)}")
@@ -169,3 +200,51 @@ if st.session_state.authenticated:
             st.session_state.user = ""
             st.session_state.authenticated = False
             st.rerun()
+
+def load_ratings():
+    try:
+        if st.session_state['db_connected']:
+            # Get all ratings for the current user
+            user_ratings = list(ratings_collection.find(
+                {"user": st.session_state.user},
+                {"_id": 0, "user": 0}  # Exclude _id and user fields
+            ))
+            return user_ratings
+        else:
+            return st.session_state.ratings
+    except Exception as e:
+        st.error(f"Error loading ratings: {str(e)}")
+        return []
+
+def display_ratings():
+    st.subheader("Your Ratings")
+    try:
+        if st.session_state['db_connected']:
+            # Get all ratings for the current user
+            user_ratings = list(ratings_collection.find(
+                {"user": st.session_state.user}
+            ).sort("timestamp", -1))
+            
+            if not user_ratings:
+                st.write("No ratings yet. Start rating faces!")
+                return
+                
+            # Create a DataFrame for display
+            ratings_df = pd.DataFrame(user_ratings)
+            ratings_df['timestamp'] = pd.to_datetime(ratings_df['timestamp'])
+            ratings_df = ratings_df[['image', 'rating', 'timestamp']]
+            ratings_df.columns = ['Image', 'Rating', 'Time']
+            st.dataframe(ratings_df)
+        else:
+            if not st.session_state.ratings:
+                st.write("No ratings yet. Start rating faces!")
+                return
+                
+            # Create a DataFrame for display
+            ratings_df = pd.DataFrame(st.session_state.ratings)
+            ratings_df['timestamp'] = pd.to_datetime(ratings_df['timestamp'])
+            ratings_df = ratings_df[['image', 'rating', 'timestamp']]
+            ratings_df.columns = ['Image', 'Rating', 'Time']
+            st.dataframe(ratings_df)
+    except Exception as e:
+        st.error(f"Error displaying ratings: {str(e)}")
