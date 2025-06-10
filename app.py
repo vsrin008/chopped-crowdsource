@@ -8,20 +8,6 @@ from bson.objectid import ObjectId
 import certifi
 import requests
 
-def get_external_ip():
-    try:
-        response = requests.get("https://api64.ipify.org?format=json")
-        if response.status_code == 200:
-            data = response.json()
-            return data.get("ip")
-    except Exception as e:
-        st.error(f"Error getting IP: {str(e)}")
-    return "Unknown"
-
-# Display the external IP at startup
-external_ip = get_external_ip()
-st.write("External IP:", external_ip)
-
 # MongoDB setup
 try:
     client = MongoClient(
