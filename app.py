@@ -9,39 +9,38 @@ import certifi
 import requests
 import time
 from datetime import datetime
-
-def get_external_ip():
-    try:
-        response = requests.get("https://api64.ipify.org?format=json")
-        if response.status_code == 200:
-            data = response.json()
-            return data.get("ip")
-    except Exception as e:
-        st.error(f"Error getting IP: {str(e)}")
-    return "Unknown"
-
-# Display the external IP at startup
-external_ip = get_external_ip()
-st.write("Current External IP:", external_ip)
+import json
 
 # MongoDB setup
 try:
+    # Get MongoDB URI from secrets
+    mongodb_uri = st.secrets["mongodb_uri"]
+    
+    # Configure client with proper SSL settings
     client = MongoClient(
-        st.secrets["mongodb_uri"],
+        mongodb_uri,
+        tls=True,
         tlsCAFile=certifi.where(),
-        serverSelectionTimeoutMS=5000
+        serverSelectionTimeoutMS=5000,
+        connectTimeoutMS=10000,
+        socketTimeoutMS=10000,
+        maxPoolSize=50,
+        retryWrites=True,
+        w='majority'
     )
+    
     # Test the connection
     client.admin.command('ping')
-    st.session_state.mongo_connected = True
+    db = client['face_ratings']
+    ratings_collection = db['ratings']
+    st.session_state['db_connected'] = True
+    
 except Exception as e:
     st.error(f"MongoDB Connection Error: {str(e)}")
-    st.session_state.mongo_connected = False
-    st.stop()
-
-db = client["face_rating_db"]
-ratings_collection = db["ratings"]
-users_collection = db["users"]
+    st.session_state['db_connected'] = False
+    # Fallback to CSV if MongoDB fails
+    if 'ratings' not in st.session_state:
+        st.session_state['ratings'] = []
 
 # Constants
 IMAGE_FOLDER = "faces_to_rate"
@@ -61,10 +60,10 @@ if not st.session_state.authenticated:
     st.title("Welcome to Face Rating!")
     
     # Debug information
-    if st.session_state.mongo_connected:
+    if st.session_state.db_connected:
         st.success("✅ Connected to MongoDB")
-        user_count = users_collection.count_documents({})
-        st.write(f"Total users in database: {user_count}")
+        user_count = ratings_collection.count_documents({})
+        st.write(f"Total ratings in database: {user_count}")
     
     tab1, tab2 = st.tabs(["Login", "Register"])
     
@@ -75,7 +74,7 @@ if not st.session_state.authenticated:
         
         if st.button("Login"):
             try:
-                user = users_collection.find_one({"username": login_username})
+                user = ratings_collection.find_one({"user": login_username})
                 if login_password == PASSWORD and user:
                     st.session_state.user = login_username
                     st.session_state.authenticated = True
@@ -94,10 +93,10 @@ if not st.session_state.authenticated:
             try:
                 if register_password != PASSWORD:
                     st.error("Invalid password")
-                elif users_collection.find_one({"username": new_username}):
+                elif ratings_collection.find_one({"user": new_username}):
                     st.error("Username already taken")
                 elif new_username:
-                    users_collection.insert_one({"username": new_username})
+                    ratings_collection.insert_one({"user": new_username})
                     st.session_state.user = new_username
                     st.session_state.authenticated = True
                     st.rerun()
